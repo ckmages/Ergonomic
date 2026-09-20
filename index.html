@@ -39,7 +39,14 @@
             padding: 10px 20px; font-size: 15px; font-weight: bold;
             background-color: #0288d1; color: white;
             border: none; border-radius: 5px; cursor: pointer;
-            margin-bottom: 10px;
+            margin: 0 4px 10px;
+        }
+        button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+        #cameraControl.stop {
+            background-color: #d32f2f;
         }
     </style>
 </head>
@@ -47,9 +54,10 @@
     <div class="container">
         <h2>📐 Web Ergonomic AI Evaluator</h2>
         <div id="hud">
-            Status: <span style="color: #ff9800;">🔄 Initializing Web AI Engine...</span>
+            Status: <span style="color: #ff9800;">Camera is off. Press Start Camera when ready.</span>
         </div>
-        <button id="toggleCam">🔄 Switch Camera (Front/Back)</button>
+        <button id="cameraControl">▶️ Start Camera</button>
+        <button id="toggleCam" disabled>🔄 Switch Camera (Front/Back)</button>
         <div class="video-box">
             <video id="webcam" autoplay playsinline></video>
             <canvas id="output_canvas"></canvas>
@@ -61,11 +69,17 @@
         const canvas = document.getElementById('output_canvas');
         const ctx = canvas.getContext('2d');
         const hud = document.getElementById('hud');
+        const cameraControlBtn = document.getElementById('cameraControl');
         const toggleCamBtn = document.getElementById('toggleCam');
 
         let useBackCamera = true;
         let activeStream = null;
         let camera = null;
+        let isCameraRunning = false;
+
+        function setStatus(message, color = '#ff9800') {
+            hud.innerHTML = `Status: <span style="color:${color};">${message}</span>`;
+        }
 
         function calculateAngle(a, b, c) {
             const ba = { x: a.x - b.x, y: a.y - b.y };
@@ -96,13 +110,15 @@
         });
 
         pose.onResults((results) => {
+            if (!isCameraRunning) return;
+
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
             if (!results.poseLandmarks) {
-                hud.innerHTML = "Status: <span style='color:#aaa;'>Awaiting human target presence...</span>";
+                setStatus('Awaiting human target presence...', '#aaa');
                 return;
             }
 
@@ -132,13 +148,16 @@
         });
 
         async function startCamera() {
+            if (isCameraRunning) return;
+
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                hud.innerHTML = "<span style='color:#FF1744;'>Camera unavailable. Open this page using HTTPS and allow camera access.</span>";
+                setStatus('Camera unavailable. Open this page using HTTPS and allow camera access.', '#FF1744');
                 return;
             }
 
-            if (camera) camera.stop();
-            if (activeStream) activeStream.getTracks().forEach((track) => track.stop());
+            cameraControlBtn.disabled = true;
+            toggleCamBtn.disabled = true;
+            setStatus('Requesting camera permission...', '#ff9800');
 
             try {
                 activeStream = await navigator.mediaDevices.getUserMedia({
@@ -158,18 +177,53 @@
                     height: 480
                 });
                 camera.start();
-                hud.innerHTML = "Status: <span style='color:#00E676;'>Camera active — stand in view.</span>";
+                isCameraRunning = true;
+                cameraControlBtn.disabled = false;
+                cameraControlBtn.textContent = '⏹️ Stop Camera';
+                cameraControlBtn.classList.add('stop');
+                toggleCamBtn.disabled = false;
+                setStatus('Camera active — stand in view.', '#00E676');
             } catch (err) {
-                hud.innerHTML = `<span style="color:#FF1744;">Camera error: ${err.name || ''} ${err.message || err}</span>`;
+                isCameraRunning = false;
+                cameraControlBtn.disabled = false;
+                toggleCamBtn.disabled = true;
+                setStatus(`Camera error: ${err.name || ''} ${err.message || err}`, '#FF1744');
             }
         }
 
-        toggleCamBtn.addEventListener('click', () => {
-            useBackCamera = !useBackCamera;
-            startCamera();
+        function stopCamera() {
+            if (camera) {
+                camera.stop();
+                camera = null;
+            }
+            if (activeStream) {
+                activeStream.getTracks().forEach((track) => track.stop());
+                activeStream = null;
+            }
+
+            video.srcObject = null;
+            isCameraRunning = false;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            cameraControlBtn.textContent = '▶️ Start Camera';
+            cameraControlBtn.classList.remove('stop');
+            toggleCamBtn.disabled = true;
+            setStatus('Camera is off. Press Start Camera when ready.', '#ff9800');
+        }
+
+        cameraControlBtn.addEventListener('click', () => {
+            if (isCameraRunning) {
+                stopCamera();
+            } else {
+                startCamera();
+            }
         });
 
-        window.addEventListener('load', startCamera);
+        toggleCamBtn.addEventListener('click', async () => {
+            if (!isCameraRunning) return;
+            useBackCamera = !useBackCamera;
+            stopCamera();
+            await startCamera();
+        });
     </script>
 </body>
 </html>
