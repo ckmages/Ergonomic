@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web-Based AI Ergonomic Tracker</title>
 
-    <!-- MediaPipe Pose and camera helper libraries -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 
@@ -16,10 +15,8 @@
             background-color: #121212; color: #ffffff;
             text-align: center;
         }
-        .container {
-            max-width: 640px; margin: 0 auto; position: relative;
-        }
-        #hud {
+        .container { max-width: 640px; margin: 0 auto; position: relative; }
+        #hud, .chart-panel {
             background: rgba(0, 0, 0, 0.85);
             border: 2px solid #555; border-radius: 8px;
             padding: 12px; margin-bottom: 15px;
@@ -32,13 +29,13 @@
             display: flex; justify-content: center; align-items: center;
         }
         video { display: none; }
-        canvas {
-            position: relative;
-            display: block;
-            width: 100%;
-            height: auto;
-            max-width: 100%;
-            object-fit: contain;
+        #output_canvas {
+            position: relative; display: block; width: 100%; height: auto;
+            max-width: 100%; object-fit: contain;
+        }
+        #historyChart {
+            display: block; width: 100%; height: 240px;
+            background: #1b1b1b; border-radius: 5px;
         }
         button {
             padding: 10px 20px; font-size: 15px; font-weight: bold;
@@ -46,13 +43,12 @@
             border: none; border-radius: 5px; cursor: pointer;
             margin: 0 4px 10px;
         }
-        button:disabled {
-            background-color: #555;
-            cursor: not-allowed;
-        }
-        #cameraControl.stop {
-            background-color: #d32f2f;
-        }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        #cameraControl.stop { background-color: #d32f2f; }
+        .chart-title { margin: 0 0 8px; }
+        .legend { font-size: 12px; font-weight: normal; color: #ccc; margin-top: 8px; }
+        .legend span { margin: 0 5px; }
+        #clearHistory { background-color: #616161; }
     </style>
 </head>
 <body>
@@ -63,10 +59,23 @@
         </div>
         <button id="cameraControl">▶️ Start Camera</button>
         <button id="toggleCam" disabled>🔄 Switch Camera (Front/Back)</button>
+
         <div class="video-box">
             <video id="webcam" autoplay playsinline></video>
             <canvas id="output_canvas"></canvas>
         </div>
+
+        <section class="chart-panel">
+            <h3 class="chart-title">📈 Posture History</h3>
+            <canvas id="historyChart" width="616" height="240"></canvas>
+            <div class="legend">
+                <span style="color:#00E676">● Low risk</span>
+                <span style="color:#FFEA00">● Medium risk</span>
+                <span style="color:#FF1744">● High risk</span>
+                <span>Angle over the last 60 seconds</span>
+            </div>
+            <button id="clearHistory">🗑️ Clear History</button>
+        </section>
     </div>
 
     <script>
@@ -76,11 +85,18 @@
         const hud = document.getElementById('hud');
         const cameraControlBtn = document.getElementById('cameraControl');
         const toggleCamBtn = document.getElementById('toggleCam');
+        const historyCanvas = document.getElementById('historyChart');
+        const historyCtx = historyCanvas.getContext('2d');
+        const clearHistoryBtn = document.getElementById('clearHistory');
 
         let useBackCamera = true;
         let activeStream = null;
         let camera = null;
         let isCameraRunning = false;
+        let lastHistorySample = 0;
+        const postureHistory = [];
+        const MAX_HISTORY_POINTS = 60;
+        const SAMPLE_INTERVAL_MS = 1000;
 
         function setStatus(message, color = '#ff9800') {
             hud.innerHTML = `Status: <span style="color:${color};">${message}</span>`;
@@ -103,6 +119,79 @@
             return { text: 'HIGH RISK (Ergonomic Hazard!)', color: '#FF1744' };
         }
 
+        function recordPosture(angle, risk) {
+            const now = Date.now();
+            if (now - lastHistorySample < SAMPLE_INTERVAL_MS) return;
+            lastHistorySample = now;
+            postureHistory.push({ time: now, angle, risk: risk.text, color: risk.color });
+            if (postureHistory.length > MAX_HISTORY_POINTS) postureHistory.shift();
+            drawHistoryChart();
+        }
+
+        function drawHistoryChart() {
+            const width = historyCanvas.width;
+            const height = historyCanvas.height;
+            const padding = { top: 20, right: 15, bottom: 28, left: 42 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+            historyCtx.clearRect(0, 0, width, height);
+            historyCtx.fillStyle = '#1b1b1b';
+            historyCtx.fillRect(0, 0, width, height);
+
+            // Risk bands: angle close to 180 degrees is better.
+            const y = (angle) => padding.top + ((180 - Math.max(0, Math.min(180, angle))) / 180) * chartHeight;
+            historyCtx.fillStyle = 'rgba(0, 230, 118, 0.12)';
+            historyCtx.fillRect(padding.left, y(180), chartWidth, y(165) - y(180));
+            historyCtx.fillStyle = 'rgba(255, 234, 0, 0.10)';
+            historyCtx.fillRect(padding.left, y(165), chartWidth, y(150) - y(165));
+            historyCtx.fillStyle = 'rgba(255, 23, 68, 0.10)';
+            historyCtx.fillRect(padding.left, y(150), chartWidth, chartHeight - (y(150) - padding.top));
+
+            historyCtx.strokeStyle = '#555';
+            historyCtx.lineWidth = 1;
+            historyCtx.fillStyle = '#aaa';
+            historyCtx.font = '11px sans-serif';
+            [180, 135, 90, 45, 0].forEach((value) => {
+                const yPosition = y(value);
+                historyCtx.beginPath();
+                historyCtx.moveTo(padding.left, yPosition);
+                historyCtx.lineTo(width - padding.right, yPosition);
+                historyCtx.stroke();
+                historyCtx.fillText(`${value}°`, 5, yPosition + 4);
+            });
+
+            if (postureHistory.length === 0) {
+                historyCtx.fillStyle = '#aaa';
+                historyCtx.textAlign = 'center';
+                historyCtx.fillText('Start the camera to record posture history', width / 2, height / 2);
+                historyCtx.textAlign = 'left';
+                return;
+            }
+
+            historyCtx.beginPath();
+            postureHistory.forEach((point, index) => {
+                const x = postureHistory.length === 1
+                    ? padding.left + chartWidth / 2
+                    : padding.left + (index / (postureHistory.length - 1)) * chartWidth;
+                const pointY = y(point.angle);
+                if (index === 0) historyCtx.moveTo(x, pointY);
+                else historyCtx.lineTo(x, pointY);
+            });
+            historyCtx.strokeStyle = '#29B6F6';
+            historyCtx.lineWidth = 2;
+            historyCtx.stroke();
+
+            postureHistory.forEach((point, index) => {
+                const x = postureHistory.length === 1
+                    ? padding.left + chartWidth / 2
+                    : padding.left + (index / (postureHistory.length - 1)) * chartWidth;
+                historyCtx.fillStyle = point.color;
+                historyCtx.beginPath();
+                historyCtx.arc(x, y(point.angle), 4, 0, 2 * Math.PI);
+                historyCtx.fill();
+            });
+        }
+
         const pose = new Pose({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
         });
@@ -116,7 +205,6 @@
 
         pose.onResults((results) => {
             if (!isCameraRunning) return;
-
             const width = video.videoWidth || 640;
             const height = video.videoHeight || 480;
             if (canvas.width !== width || canvas.height !== height) {
@@ -139,6 +227,7 @@
 
             const angle = calculateAngle(shoulder, hip, knee);
             const risk = evaluateRisk(angle);
+            recordPosture(angle, risk);
             hud.innerHTML = `Angle: ${Math.round(angle)}° | Risk: <span style="color:${risk.color}">${risk.text}</span>`;
 
             ctx.strokeStyle = '#FFFFFF';
@@ -159,7 +248,6 @@
 
         async function startCamera() {
             if (isCameraRunning) return;
-
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 setStatus('Camera unavailable. Open this page using HTTPS and allow camera access.', '#FF1744');
                 return;
@@ -174,17 +262,13 @@
                     audio: false,
                     video: {
                         facingMode: useBackCamera ? { ideal: 'environment' } : { ideal: 'user' },
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
+                        width: { ideal: 640 }, height: { ideal: 480 }
                     }
                 });
-
                 video.srcObject = activeStream;
                 await video.play();
                 camera = new Camera(video, {
-                    onFrame: async () => pose.send({ image: video }),
-                    width: 640,
-                    height: 480
+                    onFrame: async () => pose.send({ image: video }), width: 640, height: 480
                 });
                 camera.start();
                 isCameraRunning = true;
@@ -202,15 +286,11 @@
         }
 
         function stopCamera() {
-            if (camera) {
-                camera.stop();
-                camera = null;
-            }
+            if (camera) { camera.stop(); camera = null; }
             if (activeStream) {
                 activeStream.getTracks().forEach((track) => track.stop());
                 activeStream = null;
             }
-
             video.srcObject = null;
             isCameraRunning = false;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -221,11 +301,8 @@
         }
 
         cameraControlBtn.addEventListener('click', () => {
-            if (isCameraRunning) {
-                stopCamera();
-            } else {
-                startCamera();
-            }
+            if (isCameraRunning) stopCamera();
+            else startCamera();
         });
 
         toggleCamBtn.addEventListener('click', async () => {
@@ -234,6 +311,14 @@
             stopCamera();
             await startCamera();
         });
+
+        clearHistoryBtn.addEventListener('click', () => {
+            postureHistory.length = 0;
+            lastHistorySample = 0;
+            drawHistoryChart();
+        });
+
+        drawHistoryChart();
     </script>
 </body>
 </html>
