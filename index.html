@@ -26,14 +26,19 @@
             font-size: 16px; font-weight: bold;
         }
         .video-box {
-            position: relative; width: 100%; aspect-ratio: 4/3;
+            position: relative; width: 100%; min-height: 240px;
             background: #1e1e1e; border-radius: 8px; overflow: hidden;
             border: 3px solid #333;
+            display: flex; justify-content: center; align-items: center;
         }
         video { display: none; }
         canvas {
-            position: absolute; top: 0; left: 0;
-            width: 100%; height: 100%;
+            position: relative;
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 100%;
+            object-fit: contain;
         }
         button {
             padding: 10px 20px; font-size: 15px; font-weight: bold;
@@ -112,8 +117,13 @@
         pose.onResults((results) => {
             if (!isCameraRunning) return;
 
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
+            const width = video.videoWidth || 640;
+            const height = video.videoHeight || 480;
+            if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+            }
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
@@ -132,7 +142,7 @@
             hud.innerHTML = `Angle: ${Math.round(angle)}° | Risk: <span style="color:${risk.color}">${risk.text}</span>`;
 
             ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = 4;
+            ctx.lineWidth = Math.max(3, canvas.width / 160);
             ctx.beginPath();
             ctx.moveTo(shoulder.x * canvas.width, shoulder.y * canvas.height);
             ctx.lineTo(hip.x * canvas.width, hip.y * canvas.height);
@@ -142,7 +152,7 @@
             [shoulder, hip, knee].forEach((joint) => {
                 ctx.fillStyle = '#00B0FF';
                 ctx.beginPath();
-                ctx.arc(joint.x * canvas.width, joint.y * canvas.height, 8, 0, 2 * Math.PI);
+                ctx.arc(joint.x * canvas.width, joint.y * canvas.height, Math.max(6, canvas.width / 80), 0, 2 * Math.PI);
                 ctx.fill();
             });
         });
