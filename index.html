@@ -4,11 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web-Based AI Ergonomic Tracker</title>
-    
-    <!-- Load Modern MediaPipe Vision Tasks APIs from Web CDN -->
-    <script src="https://jsdelivr.net" crossorigin="anonymous"></script>
-    <script src="https://jsdelivr.net" crossorigin="anonymous"></script>
-    <script src="https://jsdelivr.net" crossorigin="anonymous"></script>
+
+    <!-- MediaPipe Pose and camera helper libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 
     <style>
         body {
@@ -31,7 +30,7 @@
             background: #1e1e1e; border-radius: 8px; overflow: hidden;
             border: 3px solid #333;
         }
-        video { display: none; } /* Run video hidden underneath */
+        video { display: none; }
         canvas {
             position: absolute; top: 0; left: 0;
             width: 100%; height: 100%;
@@ -45,16 +44,12 @@
     </style>
 </head>
 <body>
-
     <div class="container">
         <h2>📐 Web Ergonomic AI Evaluator</h2>
-        
         <div id="hud">
             Status: <span style="color: #ff9800;">🔄 Initializing Web AI Engine...</span>
         </div>
-
         <button id="toggleCam">🔄 Switch Camera (Front/Back)</button>
-
         <div class="video-box">
             <video id="webcam" autoplay playsinline></video>
             <canvas id="output_canvas"></canvas>
@@ -70,29 +65,25 @@
 
         let useBackCamera = true;
         let activeStream = null;
+        let camera = null;
 
-        // Mathematical vector calculation logic
         function calculateAngle(a, b, c) {
-            let ba = { x: a.x - b.x, y: a.y - b.y };
-            let bc = { x: c.x - b.x, y: c.y - b.y };
-            
-            let dotProduct = (ba.x * bc.x) + (ba.y * bc.y);
-            let magA = Math.sqrt(ba.x * ba.x + ba.y * ba.y);
-            let magB = Math.sqrt(bc.x * bc.x + bc.y * bc.y);
-            
-            let cosine = dotProduct / (magA * magB + 1e-6);
-            let angle = Math.acos(Math.max(-1, Math.min(1, cosine)));
-            return angle * (180 / Math.PI);
+            const ba = { x: a.x - b.x, y: a.y - b.y };
+            const bc = { x: c.x - b.x, y: c.y - b.y };
+            const dotProduct = (ba.x * bc.x) + (ba.y * bc.y);
+            const magA = Math.sqrt(ba.x * ba.x + ba.y * ba.y);
+            const magB = Math.sqrt(bc.x * bc.x + bc.y * bc.y);
+            const cosine = dotProduct / (magA * magB + 1e-6);
+            return Math.acos(Math.max(-1, Math.min(1, cosine))) * (180 / Math.PI);
         }
 
         function evaluateRisk(angle) {
-            let deviation = Math.abs(180 - angle); // 180° is a fully neutral spine alignment
-            if (deviation <= 15) return { text: "LOW RISK (Neutral)", color: "#00E676" };
-            if (deviation <= 30) return { text: "MEDIUM RISK (Flexion Warning)", color: "#FFEA00" };
-            return { text: "HIGH RISK (Ergonomic Hazard!)", color: "#FF1744" };
+            const deviation = Math.abs(180 - angle);
+            if (deviation <= 15) return { text: 'LOW RISK (Neutral)', color: '#00E676' };
+            if (deviation <= 30) return { text: 'MEDIUM RISK (Flexion Warning)', color: '#FFEA00' };
+            return { text: 'HIGH RISK (Ergonomic Hazard!)', color: '#FF1744' };
         }
 
-        // Initialize MediaPipe Pose Core Config
         const pose = new Pose({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
         });
@@ -105,82 +96,80 @@
         });
 
         pose.onResults((results) => {
-            // Draw raw camera feed framework
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-            if (results.poseLandmarks) {
-                // Fetch joint indexes: Left Shoulder (11), Left Hip (23), Left Knee (25)
-                const shoulder = results.poseLandmarks[11];
-                const hip = results.poseLandmarks[23];
-                const knee = results.poseLandmarks[25];
-
-                if (shoulder && hip && knee) {
-                    const angle = calculateAngle(shoulder, hip, knee);
-                    const risk = evaluateRisk(angle);
-
-                    // Update UI HUD panel
-                    hud.innerHTML = `Angle: ${Math.round(angle)}° | Risk: <span style="color:${risk.color}">${risk.text}</span>`;
-
-                    // Draw skeleton line traces
-                    ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4;
-                    ctx.beginPath();
-                    ctx.moveTo(shoulder.x * canvas.width, shoulder.y * canvas.height);
-                    ctx.lineTo(hip.x * canvas.width, hip.y * canvas.height);
-                    ctx.lineTo(knee.x * canvas.width, knee.y * canvas.height);
-                    ctx.stroke();
-
-                    // Draw point nodes
-                    [shoulder, hip, knee].forEach(joint => {
-                        ctx.fillStyle = "#00B0FF"; ctx.beginPath();
-                        ctx.arc(joint.x * canvas.width, joint.y * canvas.height, 8, 0, 2 * Math.PI);
-                        ctx.fill();
-                    });
-                }
-            } else {
+            if (!results.poseLandmarks) {
                 hud.innerHTML = "Status: <span style='color:#aaa;'>Awaiting human target presence...</span>";
+                return;
             }
+
+            const shoulder = results.poseLandmarks[11];
+            const hip = results.poseLandmarks[23];
+            const knee = results.poseLandmarks[25];
+            if (!shoulder || !hip || !knee) return;
+
+            const angle = calculateAngle(shoulder, hip, knee);
+            const risk = evaluateRisk(angle);
+            hud.innerHTML = `Angle: ${Math.round(angle)}° | Risk: <span style="color:${risk.color}">${risk.text}</span>`;
+
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(shoulder.x * canvas.width, shoulder.y * canvas.height);
+            ctx.lineTo(hip.x * canvas.width, hip.y * canvas.height);
+            ctx.lineTo(knee.x * canvas.width, knee.y * canvas.height);
+            ctx.stroke();
+
+            [shoulder, hip, knee].forEach((joint) => {
+                ctx.fillStyle = '#00B0FF';
+                ctx.beginPath();
+                ctx.arc(joint.x * canvas.width, joint.y * canvas.height, 8, 0, 2 * Math.PI);
+                ctx.fill();
+            });
         });
 
-        // Safe Mobile Camera hardware initiator wrapper
         async function startCamera() {
-            if (activeStream) {
-                activeStream.getTracks().forEach(track => track.stop());
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                hud.innerHTML = "<span style='color:#FF1744;'>Camera unavailable. Open this page using HTTPS and allow camera access.</span>";
+                return;
             }
 
-            const constraints = {
-                audio: false,
-                video: {
-                    facingMode: useBackCamera ? "environment" : "user",
-                    width: { ideal: 640 }, height: { ideal: 480 }
-                }
-            };
+            if (camera) camera.stop();
+            if (activeStream) activeStream.getTracks().forEach((track) => track.stop());
 
             try {
-                activeStream = await navigator.mediaDevices.getUserMedia(constraints);
+                activeStream = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: {
+                        facingMode: useBackCamera ? { ideal: 'environment' } : { ideal: 'user' },
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+
                 video.srcObject = activeStream;
-                
-                // Initialize background loops frame scanner
-                const camera = new Camera(video, {
-                    onFrame: async () => { await pose.send({ image: video }); },
-                    width: 640, height: 480
+                await video.play();
+                camera = new Camera(video, {
+                    onFrame: async () => pose.send({ image: video }),
+                    width: 640,
+                    height: 480
                 });
                 camera.start();
-                
+                hud.innerHTML = "Status: <span style='color:#00E676;'>Camera active — stand in view.</span>";
             } catch (err) {
-                hud.innerHTML = `<span style="color:#FF1744;">Camera Error: ${err.message}</span>`;
+                hud.innerHTML = `<span style="color:#FF1744;">Camera error: ${err.name || ''} ${err.message || err}</span>`;
             }
         }
 
-        toggleCamBtn.onclick = () => {
+        toggleCamBtn.addEventListener('click', () => {
             useBackCamera = !useBackCamera;
             startCamera();
-        };
+        });
 
-        // Fire engine activation sequence automatically
-        window.onload = startCamera;
+        window.addEventListener('load', startCamera);
     </script>
 </body>
 </html>
